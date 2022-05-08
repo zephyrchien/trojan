@@ -40,12 +40,15 @@ private:
     const std::string &plain_http_response;
     void destroy();
     void in_async_read();
+    // used by udp
     void in_async_write(const std::string &data);
-    void in_recv(const std::string &data);
+    // used by tcp
+    void in_async_write(const char *data, size_t length);
+    void in_recv(const char *data, size_t length);
     void in_sent();
     void out_async_read();
-    void out_async_write(const std::string &data);
-    void out_recv(const std::string &data);
+    void out_async_write(const char *data, size_t length);
+    void out_recv(const char *data, size_t length);
     void out_sent();
     void udp_async_read();
     void udp_async_write(const std::string &data, const boost::asio::ip::udp::endpoint &endpoint);

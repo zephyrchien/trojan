@@ -70,14 +70,28 @@ void ServerSession::in_async_read() {
             destroy();
             return;
         }
-        in_recv(string((const char*)in_read_buf, length));
+        in_recv((char*)in_read_buf, length);
     });
 }
 
+// used by udp
 void ServerSession::in_async_write(const string &data) {
     auto self = shared_from_this();
     auto data_copy = make_shared<string>(data);
     boost::asio::async_write(in_socket, boost::asio::buffer(*data_copy), [this, self, data_copy](const boost::system::error_code error, size_t) {
+        if (error) {
+            destroy();
+            return;
+        }
+        in_sent();
+    });
+}
+
+// used by tcp
+void ServerSession::in_async_write(const char *data, size_t length) {
+    auto self = shared_from_this();
+    boost::asio::async_write(in_socket, boost::asio::buffer(data, length), [this, self](
+        const boost::system::error_code error, size_t) {
         if (error) {
             destroy();
             return;
@@ -93,14 +107,14 @@ void ServerSession::out_async_read() {
             destroy();
             return;
         }
-        out_recv(string((const char*)out_read_buf, length));
+        out_recv((char*)out_read_buf, length);
     });
 }
 
-void ServerSession::out_async_write(const string &data) {
+void ServerSession::out_async_write(const char *data, size_t length) {
     auto self = shared_from_this();
-    auto data_copy = make_shared<string>(data);
-    boost::asio::async_write(out_socket, boost::asio::buffer(*data_copy), [this, self, data_copy](const boost::system::error_code error, size_t) {
+    boost::asio::async_write(out_socket, boost::asio::buffer(data, length), [this, self](
+        const boost::system::error_code error, size_t) {
         if (error) {
             destroy();
             return;
@@ -132,10 +146,10 @@ void ServerSession::udp_async_write(const string &data, const udp::endpoint &end
     });
 }
 
-void ServerSession::in_recv(const string &data) {
+void ServerSession::in_recv(const char *data, size_t length) {
     if (status == HANDSHAKE) {
         TrojanRequest req;
-        bool valid = req.parse(data) != -1;
+        bool valid = req.parse(data, length) != -1;
         if (valid) {
             auto password_iterator = config.password.find(req.password);
             if (password_iterator == config.password.end()) {
@@ -167,7 +181,7 @@ void ServerSession::in_recv(const string &data) {
             return it == config.ssl.alpn_port_override.end() ? config.remote_port : it->second;
         }());
         if (valid) {
-            out_write_buf = req.payload;
+            out_write_buf = std::move(req.payload);
             if (req.command == TrojanRequest::UDP_ASSOCIATE) {
                 Log::log_with_endpoint(in_endpoint, "requested UDP associate to " + req.address.address + ':' + to_string(req.address.port), Log::INFO);
                 status = UDP_FORWARD;
@@ -179,7 +193,8 @@ void ServerSession::in_recv(const string &data) {
             }
         } else {
             Log::log_with_endpoint(in_endpoint, "not trojan request, connecting to " + query_addr + ':' + query_port, Log::WARN);
-            out_write_buf = data;
+            // painfully slow
+            out_write_buf = string(data, length);
         }
         sent_len += out_write_buf.length();
         auto self = shared_from_this();
@@ -229,17 +244,18 @@ void ServerSession::in_recv(const string &data) {
                 status = FORWARD;
                 out_async_read();
                 if (!out_write_buf.empty()) {
-                    out_async_write(out_write_buf);
+                    out_async_write(out_write_buf.c_str(), out_write_buf.length());
                 } else {
                     in_async_read();
                 }
             });
         });
     } else if (status == FORWARD) {
-        sent_len += data.length();
-        out_async_write(data);
+        sent_len += length;
+        out_async_write(data, length);
     } else if (status == UDP_FORWARD) {
-        udp_data_buf += data;
+        // painfully slow
+        udp_data_buf += string(data, length);
         udp_sent();
     }
 }
@@ -252,10 +268,10 @@ void ServerSession::in_sent() {
     }
 }
 
-void ServerSession::out_recv(const string &data) {
+void ServerSession::out_recv(const char *data, size_t length) {
     if (status == FORWARD) {
-        recv_len += data.length();
-        in_async_write(data);
+        recv_len += length;
+        in_async_write(data, length);
     }
 }
 

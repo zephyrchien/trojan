@@ -40,6 +40,34 @@ int TrojanRequest::parse(const string &data) {
     return data.length();
 }
 
+int TrojanRequest::parse(const char *data, size_t length) {
+    size_t first = length;
+    for (size_t idx = 0; idx < length-1; ++idx) {
+        if (data[idx] == '\r' && data[idx+1] == '\n') {
+            first = idx;
+            break;
+        }
+    }
+    if (first == length) {
+        return -1;
+    }
+
+    password = string(data, first);
+    // painfully slow
+    payload = string(data+first+2, length-first-2);
+    if (payload.length() == 0 || (payload[0] != CONNECT && payload[0] != UDP_ASSOCIATE)) {
+        return -1;
+    }
+    command = static_cast<Command>(payload[0]);
+    size_t address_len;
+    bool is_addr_valid = address.parse(payload.substr(1), address_len);
+    if (!is_addr_valid || payload.length() < address_len + 3 || payload.substr(address_len + 1, 2) != "\r\n") {
+        return -1;
+    }
+    payload = payload.substr(address_len + 3);
+    return length;
+}
+
 string TrojanRequest::generate(const string &password, const string &domainname, uint16_t port, bool tcp) {
     string ret = password + "\r\n";
     if (tcp) {
